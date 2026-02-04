@@ -150,5 +150,6 @@ async def remove_admin(message: types.Message):
 
 executor.start_polling(dp)
 
-        admins = load_json(ADMIN_FILE)
+    admins = load_json(ADMIN_FILE)
+
 
