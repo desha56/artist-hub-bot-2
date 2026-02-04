@@ -25,13 +25,19 @@ def is_admin(user_id):
     admins = load_json(ADMIN_FILE)
     return user_id in admins
 
-def artist_keyboard():
+def load_artists():
     try:
         with open(DB_FILE, "r", encoding="utf-8") as f:
-            artists = json.load(f)
+            return json.load(f)
     except:
-        artists = {}
+        return {}
 
+def save_artists(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def artist_keyboard():
+    artists = load_artists()
     kb = types.InlineKeyboardMarkup(row_width=1)
     for name, link in artists.items():
         kb.add(types.InlineKeyboardButton(text=f"🎧 {name}", url=link))
@@ -51,18 +57,9 @@ async def add_artist(message: types.Message):
 
     try:
         _, name, link = message.text.split(" ", 2)
-
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                artists = json.load(f)
-        except:
-            artists = {}
-
+        artists = load_artists()
         artists[name] = link
-
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(artists, f, ensure_ascii=False, indent=2)
-
+        save_artists(artists)
         await message.answer(f"✅ Артист {name} добавлен")
     except:
         await message.answer("Формат:\n/add Имя https://t.me/канал")
@@ -74,14 +71,11 @@ async def remove_artist(message: types.Message):
 
     try:
         _, name = message.text.split(" ", 1)
-
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            artists = json.load(f)
+        artists = load_artists()
 
         if name in artists:
             del artists[name]
-            with open(DB_FILE, "w", encoding="utf-8") as f:
-                json.dump(artists, f, ensure_ascii=False, indent=2)
+            save_artists(artists)
             await message.answer(f"🗑️ Артист {name} удалён")
         else:
             await message.answer("Такого артиста нет")
@@ -93,12 +87,7 @@ async def list_artists(message: types.Message):
     if not is_admin(message.from_user.id):
         return
 
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            artists = json.load(f)
-    except:
-        artists = {}
-
+    artists = load_artists()
     if not artists:
         await message.answer("Список пуст")
         return
@@ -118,6 +107,7 @@ async def list_admins(message: types.Message):
     text = "👑 Админы:\n\n"
     for a in admins:
         text += f"{a}\n"
+
     await message.answer(text)
 
 @dp.message_handler(commands=["addadmin"])
@@ -147,9 +137,7 @@ async def remove_admin(message: types.Message):
     try:
         _, rem_id = message.text.split(" ", 1)
         rem_id = int(rem_id)
-
-admins = load_json(ADMIN_FILE)
-        if rem_id in admins:
+if rem_id in admins:
             admins.remove(rem_id)
             save_json(ADMIN_FILE, admins)
             await message.answer(f"🗑️ Админ {rem_id} удалён")
@@ -159,3 +147,5 @@ admins = load_json(ADMIN_FILE)
         await message.answer("Формат:\n/removeadmin 123456789")
 
 executor.start_polling(dp)
+
+        admins = load_json(ADMIN_FILE)
