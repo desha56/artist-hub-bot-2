@@ -137,7 +137,9 @@ async def remove_admin(message: types.Message):
     try:
         _, rem_id = message.text.split(" ", 1)
         rem_id = int(rem_id)
-if rem_id in admins:
+
+        admins = load_json(ADMIN_FILE)
+        if rem_id in admins:
             admins.remove(rem_id)
             save_json(ADMIN_FILE, admins)
             await message.answer(f"🗑️ Админ {rem_id} удалён")
@@ -149,3 +151,4 @@ if rem_id in admins:
 executor.start_polling(dp)
 
         admins = load_json(ADMIN_FILE)
+
