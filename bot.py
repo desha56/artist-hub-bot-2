@@ -40,7 +40,8 @@ def artist_keyboard():
     artists = load_artists()
     kb = types.InlineKeyboardMarkup(row_width=1)
     for name, link in artists.items():
-        kb.add(types.InlineKeyboardButton(text=f"🎧 {name}", url=link))
+        clean_link = link.strip()  # убираем пробелы в начале и конце
+        kb.add(types.InlineKeyboardButton(text=f"🎧 {name}", url=clean_link))
     return kb
 
 @dp.message_handler(commands=["start"])
@@ -57,6 +58,7 @@ async def add_artist(message: types.Message):
 
     try:
         _, name, link = message.text.split(" ", 2)
+        link = link.strip()  # очищаем ссылку от лишних пробелов
         artists = load_artists()
         artists[name] = link
         save_artists(artists)
@@ -149,3 +151,4 @@ async def remove_admin(message: types.Message):
         await message.answer("Формат:\n/removeadmin 123456789")
 
 executor.start_polling(dp)
+
