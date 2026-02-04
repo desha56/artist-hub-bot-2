@@ -149,7 +149,3 @@ async def remove_admin(message: types.Message):
         await message.answer("Формат:\n/removeadmin 123456789")
 
 executor.start_polling(dp)
-
-    admins = load_json(ADMIN_FILE)
-
-
