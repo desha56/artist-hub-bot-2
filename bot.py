@@ -16,7 +16,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # токен из Railway Variables
 ARTISTS_FILE = "artists.json"
 ADMINS_FILE = "admins.json"
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(8312219182:AAGaokNUp8fuyW-Bkmj0xje5oJJgkVHpT9E)
 dp = Dispatcher(bot)
 
 # ================== УТИЛИТЫ ==================
@@ -210,3 +210,4 @@ async def remove_admin(message: types.Message):
 if __name__ == "__main__":
     print("Bot started")
     executor.start_polling(dp, skip_updates=True)
+
