@@ -27,13 +27,13 @@ class AddArtist(StatesGroup):
     yandex = State()
     vk = State()
 
-class AddAdmin(StatesGroup):
-    user_id = State()
-
-class EditArtist(StatesGroup):
+class EditArtistField(StatesGroup):
+    artist_name = State()
     field = State()
     value = State()
-    artist_name = State()
+
+class AddAdmin(StatesGroup):
+    user_id = State()
 
 # ================== УТИЛИТЫ ==================
 def load_json(path, default):
@@ -95,8 +95,8 @@ def admins_keyboard(user_id):
 def profile_keyboard(artist, is_admin_flag=False):
     kb = InlineKeyboardMarkup(row_width=2)
     for platform in ["telegram","yandex_music","vk_group"]:
-        link = artist.get("links",{}).get(platform)
-        if link:
+        link = artist.get("links",{}).get(platform,"").strip()
+        if link and (link.startswith("http://") or link.startswith("https://")):
             kb.insert(InlineKeyboardButton(platform.replace("_"," ").capitalize(), url=link))
     if is_admin_flag:
         kb.insert(InlineKeyboardButton("❌ Удалить артиста", callback_data=f"del_artist:{artist['name']}"))
@@ -208,8 +208,91 @@ async def add_artist_final(message: types.Message, state: FSMContext):
     text = f"🎤 {data['name']}\n\n{data['bio']}"
     await message.answer_photo(photo, caption=text, reply_markup=kb)
 
-# ---------- РЕДАКТИРОВАНИЕ / УДАЛЕНИЕ АРТИСТОВ и АДМИНОВ ----------
-# Используются те же хендлеры как в предыдущей версии, только для фото теперь file_id
+# ---------- РЕДАКТИРОВАНИЕ АРТИСТА ----------
+@dp.callback_query_handler(lambda c: c.data.startswith("edit_artist:"))
+async def edit_artist_start(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+
+    artist_name = call.data.split(":",1)[1]
+    await state.update_data(artist_name=artist_name)
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✏️ Имя", callback_data="edit_field:name"),
+        InlineKeyboardButton("✏️ Bio", callback_data="edit_field:bio"),
+        InlineKeyboardButton("✏️ Фото", callback_data="edit_field:photo")
+    )
+    kb.add(
+        InlineKeyboardButton("✏️ Telegram", callback_data="edit_field:telegram"),
+        InlineKeyboardButton("✏️ Яндекс Музыка", callback_data="edit_field:yandex_music"),
+        InlineKeyboardButton("✏️ VK", callback_data="edit_field:vk_group")
+    )
+    kb.add(InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu"))
+
+    await call.message.edit_text("Выберите поле для редактирования:", reply_markup=kb)
+    await EditArtistField.artist_name.set()
+    await call.answer()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("edit_field:"), state=EditArtistField.artist_name)
+async def edit_field_select(call: types.CallbackQuery, state: FSMContext):
+    field = call.data.split(":",1)[1]
+    await state.update_data(field=field)
+    
+    if field == "photo":
+        await call.message.answer("Отправьте новое фото артиста (как фото)")
+    else:
+        await call.message.answer(f"Введите новое значение для {field}:")
+    
+    await EditArtistField.next()
+    await call.answer()
+
+@dp.message_handler(content_types=[types.ContentType.TEXT, types.ContentType.PHOTO], state=EditArtistField.value)
+async def edit_field_value(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    artist_name = data['artist_name']
+    field = data['field']
+
+    artists = load_artists()
+    artist = next((a for a in artists if a['name']==artist_name), None)
+    if not artist:
+        await message.answer("Артист не найден")
+        await state.finish()
+        return
+
+    if field == "photo":
+        if not message.photo:
+            await message.answer("Пожалуйста, отправьте фото.")
+            return
+        artist["photo"] = message.photo[-1].file_id
+    elif field in ["telegram","yandex_music","vk_group"]:
+        artist["links"][field] = message.text.strip()
+    else:
+        artist[field] = message.text.strip()
+
+    save_artists(artists)
+    await state.finish()
+
+    kb = profile_keyboard(artist, is_admin_flag=True)
+    text = f"🎤 {artist['name']}\n\n{artist.get('bio','Нет описания')}"
+    if artist.get("photo"):
+        await message.answer_photo(artist["photo"], caption=text, reply_markup=kb)
+    else:
+        await message.answer(text, reply_markup=kb)
+
+# ---------- УДАЛЕНИЕ АРТИСТА ----------
+@dp.callback_query_handler(lambda c: c.data.startswith("del_artist:"))
+async def delete_artist(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return
+    name = call.data.split(":",1)[1]
+    artists = load_artists()
+    artists = [a for a in artists if a["name"] != name]
+    save_artists(artists)
+    await call.answer(f"Артист {name} удален")
+    await call.message.edit_text("🎤 Наши артисты:", reply_markup=artist_keyboard(call.from_user.id))
 
 # ---------- NOOP ----------
 @dp.callback_query_handler(lambda c: c.data=="noop")
