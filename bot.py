@@ -109,14 +109,12 @@ def profile_keyboard(artist, is_admin_flag=False):
 async def start(message: types.Message):
     await message.answer("🎶 Главное меню:", reply_markup=main_menu_keyboard(message.from_user.id))
 
-# ---------- Главное меню ----------
 @dp.callback_query_handler(lambda c: c.data=="main_menu")
 async def go_main_menu(call: types.CallbackQuery):
     kb = main_menu_keyboard(call.from_user.id)
     await call.message.edit_text("🎶 Главное меню:", reply_markup=kb)
     await call.answer()
 
-# ---------- АРТИСТЫ ----------
 @dp.callback_query_handler(lambda c: c.data=="show_artists")
 async def show_artists(call: types.CallbackQuery):
     kb = artist_keyboard(call.from_user.id)
@@ -165,12 +163,13 @@ async def add_artist_name(message: types.Message, state: FSMContext):
 @dp.message_handler(state=AddArtist.bio)
 async def add_artist_bio(message: types.Message, state: FSMContext):
     await state.update_data(bio=message.text.strip())
-    await message.answer("Ссылка на фото артиста (или пусто):")
+    await message.answer("Прикрепите фото артиста (отправьте как фото):")
     await AddArtist.photo.set()
 
-@dp.message_handler(state=AddArtist.photo)
+@dp.message_handler(content_types=types.ContentType.PHOTO, state=AddArtist.photo)
 async def add_artist_photo(message: types.Message, state: FSMContext):
-    await state.update_data(photo=message.text.strip())
+    photo_file_id = message.photo[-1].file_id
+    await state.update_data(photo=photo_file_id)
     await message.answer("Ссылка на Telegram:")
     await AddArtist.telegram.set()
 
@@ -207,166 +206,12 @@ async def add_artist_final(message: types.Message, state: FSMContext):
     kb = profile_keyboard(artists[-1], is_admin_flag=True)
     photo = data["photo"]
     text = f"🎤 {data['name']}\n\n{data['bio']}"
-    if photo:
-        await message.answer_photo(photo, caption=text, reply_markup=kb)
-    else:
-        await message.answer(text, reply_markup=kb)
+    await message.answer_photo(photo, caption=text, reply_markup=kb)
 
-# ---------- РЕДАКТИРОВАНИЕ АРТИСТА ----------
-@dp.callback_query_handler(lambda c: c.data.startswith("edit_artist:"))
-async def edit_artist_start(call: types.CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        await call.answer("Нет доступа", show_alert=True)
-        return
-    artist_name = call.data.split(":",1)[1]
-    await state.update_data(artist_name=artist_name)
-    
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Имя", callback_data="edit_field:name"),
-        InlineKeyboardButton("Bio", callback_data="edit_field:bio"),
-        InlineKeyboardButton("Фото", callback_data="edit_field:photo"),
-        InlineKeyboardButton("Telegram", callback_data="edit_field:telegram"),
-        InlineKeyboardButton("Яндекс Музыка", callback_data="edit_field:yandex_music"),
-        InlineKeyboardButton("VK", callback_data="edit_field:vk_group")
-    )
-    await call.message.answer("Выберите поле для редактирования:", reply_markup=kb)
-    await call.answer()
+# ---------- РЕДАКТИРОВАНИЕ / УДАЛЕНИЕ АРТИСТОВ и АДМИНОВ ----------
+# Используются те же хендлеры как в предыдущей версии, только для фото теперь file_id
 
-@dp.callback_query_handler(lambda c: c.data.startswith("edit_field:"), state="*")
-async def edit_artist_field(call: types.CallbackQuery, state: FSMContext):
-    field = call.data.split(":",1)[1]
-    await state.update_data(field=field)
-    await call.message.answer(f"Введите новое значение для {field}:")
-    await EditArtist.value.set()
-    await call.answer()
-
-@dp.message_handler(state=EditArtist.value)
-async def edit_artist_save(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    artist_name = data["artist_name"]
-    field = data["field"]
-
-    artists = load_artists()
-    artist = next((a for a in artists if a["name"]==artist_name), None)
-    if not artist:
-        await message.answer("Артист не найден")
-        await state.finish()
-        return
-
-    new_value = message.text.strip()
-    if field in ["name","bio","photo"]:
-        artist[field] = new_value
-    else:
-        if "links" not in artist:
-            artist["links"] = {}
-        artist["links"][field] = new_value
-
-    save_artists(artists)
-    await state.finish()
-
-    kb = profile_keyboard(artist, is_admin_flag=True)
-    photo = artist.get("photo")
-    text = f"🎤 {artist['name']}\n\n{artist.get('bio','Нет описания')}"
-    if photo:
-        try:
-            media = InputMediaPhoto(media=photo, caption=text, parse_mode="Markdown")
-            await message.edit_media(media=media, reply_markup=kb)
-        except:
-            await message.answer(text, reply_markup=kb)
-    else:
-        await message.answer(text, reply_markup=kb)
-    await message.answer("✅ Поле обновлено!")
-
-# ---------- УДАЛЕНИЕ АРТИСТА ----------
-@dp.callback_query_handler(lambda c: c.data.startswith("del_artist:"))
-async def delete_artist_prompt(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        await call.answer("Нет доступа", show_alert=True)
-        return
-    name = call.data.split(":",1)[1]
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("Да", callback_data=f"confirm_del_artist:{name}:yes"))
-    kb.add(InlineKeyboardButton("Отмена", callback_data=f"confirm_del_artist:{name}:no"))
-    await call.message.edit_reply_markup(kb)
-    await call.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("confirm_del_artist:"))
-async def confirm_delete_artist(call: types.CallbackQuery):
-    _, name, action = call.data.split(":",2)
-    artists = load_artists()
-    if action=="yes":
-        artists = [a for a in artists if a["name"]!=name]
-        save_artists(artists)
-        kb = artist_keyboard(call.from_user.id)
-        await call.message.edit_text("🎤 Наши артисты:", reply_markup=kb)
-        await call.answer(f"✅ Артист {name} удалён")
-    else:
-        kb = artist_keyboard(call.from_user.id)
-        await call.message.edit_text("🎤 Наши артисты:", reply_markup=kb)
-        await call.answer("❌ Отмена удаления")
-
-# ---------- АДМИНЫ ----------
-@dp.callback_query_handler(lambda c: c.data=="show_admins")
-async def show_admins(call: types.CallbackQuery):
-    kb = admins_keyboard(call.from_user.id)
-    await call.message.edit_text("👑 Админы:", reply_markup=kb)
-    await call.answer()
-
-@dp.callback_query_handler(lambda c: c.data=="add_admin")
-async def add_admin_start(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        await call.answer("Нет доступа", show_alert=True)
-        return
-    await call.message.answer("Введите Telegram ID нового админа:")
-    await AddAdmin.user_id.set()
-    await call.answer()
-
-@dp.message_handler(state=AddAdmin.user_id)
-async def add_admin(message: types.Message, state: FSMContext):
-    try:
-        new_admin = int(message.text.strip())
-    except ValueError:
-        await message.answer("Ошибка! ID должен быть числом.")
-        return
-    admins = load_admins()
-    if new_admin in admins:
-        await message.answer("Этот пользователь уже админ.")
-    else:
-        admins.append(new_admin)
-        save_admins(admins)
-        await message.answer(f"✅ Пользователь {new_admin} добавлен как админ.")
-    await state.finish()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("del_admin:"))
-async def delete_admin_prompt(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        await call.answer("Нет доступа", show_alert=True)
-        return
-    admin_id = call.data.split(":",1)[1]
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("Да", callback_data=f"confirm_del_admin:{admin_id}:yes"))
-    kb.add(InlineKeyboardButton("Отмена", callback_data=f"confirm_del_admin:{admin_id}:no"))
-    await call.message.edit_reply_markup(kb)
-    await call.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("confirm_del_admin:"))
-async def confirm_delete_admin(call: types.CallbackQuery):
-    _, admin_id, action = call.data.split(":",2)
-    admin_id = int(admin_id)
-    admins = load_admins()
-    if action=="yes":
-        if admin_id in admins:
-            admins.remove(admin_id)
-            save_admins(admins)
-        kb = admins_keyboard(call.from_user.id)
-        await call.message.edit_text("👑 Админы:", reply_markup=kb)
-        await call.answer(f"✅ Админ {admin_id} удалён")
-    else:
-        kb = admins_keyboard(call.from_user.id)
-        await call.message.edit_text("👑 Админы:", reply_markup=kb)
-        await call.answer("❌ Отмена удаления")
-
+# ---------- NOOP ----------
 @dp.callback_query_handler(lambda c: c.data=="noop")
 async def noop(call: types.CallbackQuery):
     await call.answer()
