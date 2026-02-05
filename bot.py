@@ -11,13 +11,17 @@ from aiogram.types import (
 
 # ================== НАСТРОЙКИ ==================
 
-BOT_TOKEN = os.getenv("8312219182:AAGaokNUp8fuyW-Bkmj0xje5oJJgkVHpT9E")  # токен из Railway Variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN not set")
 
 ARTISTS_FILE = "artists.json"
 ADMINS_FILE = "admins.json"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
+
 
 # ================== УТИЛИТЫ ==================
 
@@ -210,5 +214,6 @@ async def remove_admin(message: types.Message):
 if __name__ == "__main__":
     print("Bot started")
     executor.start_polling(dp, skip_updates=True)
+
 
 
