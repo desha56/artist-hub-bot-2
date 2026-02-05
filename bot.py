@@ -1,27 +1,26 @@
 import json
 import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton
 )
+from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 
 # ================== НАСТРОЙКИ ==================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
-
 ARTISTS_FILE = "artists.json"
 ADMINS_FILE = "admins.json"
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
-
+dp = Dispatcher(bot, storage=MemoryStorage())
 
 # ================== УТИЛИТЫ ==================
 
@@ -36,184 +35,88 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def load_artists():
-    return load_json(ARTISTS_FILE, {})
+# ================== СОСТОЯНИЯ ==================
 
-def save_artists(data):
-    save_json(ARTISTS_FILE, data)
-
-def load_admins():
-    return load_json(ADMINS_FILE, [])
-
-def save_admins(data):
-    save_json(ADMINS_FILE, data)
-
-def is_admin(user_id):
-    return user_id in load_admins()
+class AddArtist(StatesGroup):
+    name = State()
+    link = State()
 
 # ================== КЛАВИАТУРЫ ==================
 
-def main_menu(admin=False):
+def main_menu(is_admin=False):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🎶 Артисты"))
-
-    if admin:
-        kb.add(
-            KeyboardButton("➕ Добавить артиста"),
-            KeyboardButton("🗑 Удалить артиста")
-        )
-        kb.add(
-            KeyboardButton("👑 Админы")
-        )
+    kb.add(KeyboardButton("🎤 Артисты"))
+    if is_admin:
+        kb.add(KeyboardButton("➕ Добавить артиста"))
     return kb
 
-
-def artist_keyboard():
-    artists = load_artists()
-    kb = InlineKeyboardMarkup(row_width=1)
-
-    for name, link in artists.items():
-        kb.add(
-            InlineKeyboardButton(
-                text=f"🎧 {name}",
-                url=link.strip()
-            )
-        )
-    return kb
-
-# ================== START ==================
+# ================== ХЕНДЛЕРЫ ==================
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
+    admins = load_json(ADMINS_FILE, [])
+    is_admin = message.from_user.id in admins
+
     await message.answer(
-        "🎧 Добро пожаловать.\nВыбирай действие:",
-        reply_markup=main_menu(is_admin(message.from_user.id))
+        "🎶 Добро пожаловать!\nВыбери действие:",
+        reply_markup=main_menu(is_admin)
     )
 
-# ================== ПОЛЬЗОВАТЕЛИ ==================
+# ---------- ПОКАЗ АРТИСТОВ ----------
 
-@dp.message_handler(lambda m: m.text == "🎶 Артисты")
+@dp.message_handler(lambda m: m.text == "🎤 Артисты")
 async def show_artists(message: types.Message):
-    artists = load_artists()
+    artists = load_json(ARTISTS_FILE, [])
 
     if not artists:
-        await message.answer("Пока артистов нет 👀")
+        await message.answer("Артистов пока нет 😢")
         return
 
-    await message.answer(
-        "Выбирай артиста:",
-        reply_markup=artist_keyboard()
-    )
+    kb = InlineKeyboardMarkup()
+    for a in artists:
+        kb.add(
+            InlineKeyboardButton(
+                text=a["name"],
+                url=a["link"].strip()
+            )
+        )
 
-# ================== АДМИНЫ ==================
+    await message.answer("🎤 Наши артисты:", reply_markup=kb)
 
-@dp.message_handler(lambda m: m.text == "👑 Админы")
-async def admins_list(message: types.Message):
-    if not is_admin(message.from_user.id):
+# ---------- ДОБАВЛЕНИЕ АРТИСТА ----------
+
+@dp.message_handler(lambda m: m.text == "➕ Добавить артиста")
+async def add_artist_start(message: types.Message):
+    admins = load_json(ADMINS_FILE, [])
+    if message.from_user.id not in admins:
         return
 
-    admins = load_admins()
-    text = "👑 Админы:\n\n" + "\n".join(map(str, admins))
-    await message.answer(text)
+    await message.answer("Введи имя артиста:")
+    await AddArtist.name.set()
 
-# ================== КОМАНДЫ АДМИНОВ ==================
+@dp.message_handler(state=AddArtist.name)
+async def add_artist_name(message: types.Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await message.answer("Теперь ссылку на Telegram-канал (https://t.me/...):")
+    await AddArtist.link.set()
 
-@dp.message_handler(commands=["add"])
-async def add_artist(message: types.Message):
-    if not is_admin(message.from_user.id):
-        return
+@dp.message_handler(state=AddArtist.link)
+async def add_artist_link(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    artists = load_json(ARTISTS_FILE, [])
 
-    try:
-        _, name, link = message.text.split(" ", 2)
-        artists = load_artists()
-        artists[name] = link.strip()
-        save_artists(artists)
-        await message.answer(f"✅ Артист {name} добавлен")
-    except:
-        await message.answer("Формат:\n/add Имя https://t.me/канал")
+    artists.append({
+        "name": data["name"],
+        "link": message.text.strip()
+    })
 
+    save_json(ARTISTS_FILE, artists)
+    await state.finish()
 
-@dp.message_handler(commands=["remove"])
-async def remove_artist(message: types.Message):
-    if not is_admin(message.from_user.id):
-        return
-
-    try:
-        _, name = message.text.split(" ", 1)
-        artists = load_artists()
-
-        if name not in artists:
-            await message.answer("❌ Артист не найден")
-            return
-
-        del artists[name]
-        save_artists(artists)
-        await message.answer(f"🗑 Артист {name} удалён")
-    except:
-        await message.answer("Формат:\n/remove Имя")
-
-
-@dp.message_handler(commands=["list"])
-async def list_artists(message: types.Message):
-    artists = load_artists()
-
-    if not artists:
-        await message.answer("Артистов пока нет")
-        return
-
-    text = "🎶 Артисты:\n\n"
-    for name, link in artists.items():
-        text += f"{name} — {link}\n"
-
-    await message.answer(text)
-
-
-@dp.message_handler(commands=["addadmin"])
-async def add_admin(message: types.Message):
-    if not is_admin(message.from_user.id):
-        return
-
-    try:
-        _, admin_id = message.text.split(" ", 1)
-        admin_id = int(admin_id)
-
-        admins = load_admins()
-        if admin_id in admins:
-            await message.answer("Он уже админ")
-            return
-
-        admins.append(admin_id)
-        save_admins(admins)
-        await message.answer(f"👑 Админ {admin_id} добавлен")
-    except:
-        await message.answer("Формат:\n/addadmin 123456789")
-
-
-@dp.message_handler(commands=["removeadmin"])
-async def remove_admin(message: types.Message):
-    if not is_admin(message.from_user.id):
-        return
-
-    try:
-        _, admin_id = message.text.split(" ", 1)
-        admin_id = int(admin_id)
-
-        admins = load_admins()
-        if admin_id not in admins:
-            await message.answer("Такого админа нет")
-            return
-
-        admins.remove(admin_id)
-        save_admins(admins)
-        await message.answer(f"❌ Админ {admin_id} удалён")
-    except:
-        await message.answer("Формат:\n/removeadmin 123456789")
+    await message.answer("✅ Артист добавлен!")
 
 # ================== ЗАПУСК ==================
 
 if __name__ == "__main__":
     print("Bot started")
     executor.start_polling(dp, skip_updates=True)
-
-
-
